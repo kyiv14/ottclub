@@ -174,44 +174,47 @@ try:
 
     print(f"[*] Поточний URL кабінету: {driver.current_url}")
 
-    # ── 8. КЛІКАЄМО НА КНОПКУ КОРИСТУВАЧА ЩОБ ОТКРИТИ МОДАЛКУ ───────────────
-    print("[*] Крок 8: Ініціюємо клік по іконці користувача для відкриття модалки...")
+    # ── 8. ПРИМУСОВИЙ КЛІК НА ПРОФІЛЬ ЧЕРЕЗ JS ДЛЯ HEADLESS РЕЖИМУ ───────────
+    print("[*] Крок 8: Емуляція відкриття модалки профілю через JS тригер...")
     try:
+        # Находим кнопку-ссылку профиля в DOM-дереве
         profile_trigger = wait.until(
             EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'popup-settings') or contains(@href, 'profile')] | //*[contains(@class, 'header__user')] | //a[descendant::use[contains(@href, 'userB')]]"))
         )
+        # Кликаем жестко через JS, чтобы пробить отсутствие визуального фокуса в Headless
         driver.execute_script("arguments[0].click();", profile_trigger)
-        print("[+] Клікнули по профілю! Чекаємо завантаження модальних даних...")
-        time.sleep(3)
+        print("[+] Клікнули по профілю! Очікуємо 4 секунди на генерацію модальних даних...")
+        time.sleep(4)
     except Exception as ue:
-        print(f"[-] Не вдалося знайти стандартний тригер профілю ({ue}), пробуємо резервний клік по SVG...")
+        print(f"[-] Основний тригер не зпрацював ({ue}), б'ємо по резервному SVG...")
         try:
             svg_fallback = driver.find_element(By.XPATH, "//*[local-name()='use' and contains(@href, 'userB')]/..")
             driver.execute_script("arguments[0].click();", svg_fallback)
-            print("[+] Спрацював резервний клік по SVG-батьку")
-            time.sleep(3)
+            time.sleep(4)
         except Exception:
             pass
 
-    # ── 9. ЗАБИРАЄМО КЛЮЧ З ID #subs_ottkey ──────────────────────────────────
-    print("[*] Крок 9: Очікуємо появу та наповнення елемента #subs_ottkey...")
+    # ── 9. ЗАБИРАЄМО КЛЮЧ З ID #subs_ottkey (КОНТРОЛЬ НАПОВНЕННЯ СЕРВЕРОМ) ──
+    print("[*] Крок 9: Збір та перевірка контенту елемента #subs_ottkey...")
     final_key = None
     try:
+        # Ждем, пока элемент встроится в структуру страницы
         key_el = wait.until(EC.presence_of_element_located((By.ID, "subs_ottkey")))
         
-        # Перевіряємо наявність тексту всередині блоку (цикл очікування наповнення до 10 секунд)
-        for _ in range(10):
+        # Запускаем цикл проверки контента (до 15 секунд), чтобы дождаться ответа сервера OTTclub
+        for _ in range(15):
             raw_key = key_el.get_attribute("textContent") or ""
             raw_key = raw_key.strip()
+            # Проверяем, что внутри лежит именно токен (8-12 символов), а не пустота
             if len(raw_key) >= 8 and len(raw_key) <= 12 and raw_key != "E1KGAHB6XRA4":
                 final_key = raw_key
                 break
             time.sleep(1)
             
     except Exception as ke:
-        print(f"[-] Помилка при отриманні тексту з #subs_ottkey: {ke}")
+        print(f"[-] Не вдалося зчитати textContent з елемента: {ke}")
 
-    # Резервний прямий забір через JS-екстрактор
+    # Финальный фалбек через выполнение скрипта в контексте страницы
     if not final_key:
         final_key = driver.execute_script('return document.querySelector("#subs_ottkey") ? document.querySelector("#subs_ottkey").textContent.trim() : null;')
 
