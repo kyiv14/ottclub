@@ -93,12 +93,9 @@ try:
     driver.get("https://ottclub.tv")
     time.sleep(6)
 
-    # Акуратно видаляємо тільки заважаючий банер кукі, не чіпаючи інтерфейс
+    # Видаляємо кукі-банер, якщо він заважає фокусу
     try:
-        driver.execute_script("""
-            var cookieBanner = document.querySelector('.cky-consent-container');
-            if(cookieBanner) { cookieBanner.remove(); print('[+] Банер кукі видалено'); }
-        """)
+        driver.execute_script("var b = document.querySelector('.cky-consent-container'); if(b) b.remove();")
     except Exception:
         pass
 
@@ -107,31 +104,39 @@ try:
         EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='email']"))
     )
     
-    # Вводимо пошту через JavaScript
-    driver.execute_script("arguments[0].value = arguments[1];", email_input, email_addr)
+    # Клінічний чистий фокус на полі
+    driver.execute_script("arguments[0].focus();", email_input)
+    time.sleep(0.5)
+
+    # ЖЕЛЕЗОБЕТОННЫЙ ПОСИМВОЛЬНЫЙ ВВОД (щоб обдурити JS-валідатор сайту)
+    print("[*] Емулюємо посимвольне введення клавіатури...")
+    for char in email_addr:
+        email_input.send_keys(char)
+        time.sleep(0.1)  # Пауза між кліками клавіш
+
+    # Додатково штовхаємо тригери, щоб кнопка точно стала активною
     driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", email_input)
     driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", email_input)
-    print("[+] Email введено через JS ін'єкцію")
+    print("[+] Email успішно введено посимвольно")
     time.sleep(2)
 
     # ── 3. Натискання кнопки реєстрації за текстом на кнопці ──────────────────
     print("[*] Крок 3: Натискання кнопки реєстрації...")
     
     try:
-        # Шукаємо кнопку, яка містить текст "Протестувати" або "безплатно"
-        submit_btn = wait.until(EC.presence_of_element_located((
+        # Шукаємо кнопку за текстом на екрані
+        submit_btn = wait.until(EC.element_to_be_clickable((
             By.XPATH, 
             "//*[contains(text(), 'Протестувати') or contains(text(), 'безплатно') or contains(text(), 'Реєстрація') or @type='submit']"
         )))
-        # Кликаємо залізобетонно через JS
+        # Тиснемо через JS
         driver.execute_script("arguments[0].click();", submit_btn)
-        print("[+] Кнопку реєстрації успішно натиснуто через JS клік")
+        print("[+] Кнопку реєстрації успішно натиснуто!")
     except Exception as click_err:
-        print(f"[-] Не вдалося знайти кнопку через точний текст ({click_err}), пробуємо клік по сусідньому елементу...")
-        # Резерв: клікаємо по першому ліпшому div/button поруч з інпутом, який схожий на кнопку
-        fallback_btn = driver.find_element(By.XPATH, "//input[@type='email']/..//button | //input[@type='email']/../..//button | //button")
+        print(f"[-] Не вдалося знайти активну кнопку через текст ({click_err}), б'ємо по тегах...")
+        fallback_btn = driver.find_element(By.XPATH, "//input[@type='email']/..//button | //input[@type='email']/../..//button | //button[contains(@class, 'btn')]")
         driver.execute_script("arguments[0].click();", fallback_btn)
-        print("[+] Виконано резервний клік по кнопці")
+        print("[+] Виконано резервний клік")
     
     time.sleep(8)
 
