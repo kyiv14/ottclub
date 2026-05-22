@@ -25,11 +25,12 @@ def get_temp_email():
         print(f"[-] Помилка отримання пошти: {e}")
         return None, None
 
-def wait_for_otp_code(session, max_wait=120):
-    """Чекає 6-значний OTP-код у листі від OTTclub."""
-    print("[*] Очікуємо OTP-код на пошті...")
+def wait_for_otp_code(session, max_wait=300):
+    """Чекає 6-значний OTP-код у листі від OTTclub з дебаг-логами."""
+    print(f"[*] Очікуємо OTP-код на пошті (максимум {max_wait} секунд)...")
     pattern = r'\b(\d{6})\b'
-    for _ in range(max_wait // 5):
+    
+    for i in range(max_wait // 5):
         time.sleep(5)
         try:
             response = session.get(
@@ -41,19 +42,26 @@ def wait_for_otp_code(session, max_wait=120):
                 code = match.group(1)
                 print(f"[+] OTP-код знайдено: {code}")
                 return code
-        except Exception:
+            
+            # Кожні 30 секунд виводимо статус у лог для контролю процесу
+            if i % 6 == 0:
+                print(f"[*] Перевіряємо пошту... Коду ще немає. Статус відповіді сервера: {response.status_code}")
+                
+        except Exception as e:
+            print(f"[!] Помилка запиту до сервера пошти: {e}")
             continue
+            
     return None
 
 def get_clean_options():
     options = uc.ChromeOptions()
-    # СЕРВЕРНИЙ РЕЖИМ (Headless увімкнено для GitHub Actions)
+    # СЕРВЕРНИЙ РЕЖИМ (Headless обов'язковий для GitHub Actions)
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1366,768")
-    # Маскування під реальний десктопний браузер
+    # Маскування під реальний десктопний браузер, щоб уникнути блокувань
     options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
     return options
@@ -62,7 +70,7 @@ print("[*] Ініціалізація серверного браузера...")
 driver = None
 options = get_clean_options()
 
-# Гнучка ініціалізація під версію Chrome на сервері GitHub
+# Гнучка ініціалізація під версію Chrome на сервері Ubuntu
 try:
     print("[*] Спроба запуска з version_main=148...")
     driver = uc.Chrome(options=options, version_main=148, use_subprocess=True)
@@ -90,7 +98,7 @@ try:
     driver.get("https://ottclub.tv")
     time.sleep(5)
 
-    # Закрити cookie-банер, якщо є
+    # Закрити cookie-банер, якщо він перекриває елементи
     try:
         accept_btn = driver.find_element(By.CSS_SELECTOR, ".cky-btn-accept")
         driver.execute_script("arguments[0].click();", accept_btn)
@@ -117,8 +125,8 @@ try:
     
     time.sleep(5)
 
-    # ── 4. OTP з пошти ───────────────────────────────────────────────────────
-    otp_code = wait_for_otp_code(py_session, max_wait=120)
+    # ── 4. OTP з пошти (Очікування збільшено до 5 хвилин) ────────────────────
+    otp_code = wait_for_otp_code(py_session, max_wait=300)
     if not otp_code:
         raise Exception("OTP-код не знайдено у листі")
 
@@ -189,7 +197,7 @@ try:
     try:
         print("[*] Шукаємо текст посилання з доменом myott.top...")
         target_element = wait.until(
-            EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'myott.top')]"))
+            EC.presence_of_element_located((By.開X_PATH, "//*[contains(text(), 'myott.top')]"))
         )
         
         full_text = target_element.text.strip()
@@ -206,7 +214,7 @@ try:
         if match:
             final_key = match.group(1)
 
-    # Фінальний вивід без приховування
+    # Фінальний відкритий вивід ключа в лог сервера
     if final_key and final_key != "E1KGAHB6XRA4":
         print(f"\n==========================================")
         print(f"[УСПІХ] НОВИЙ КЛЮЧ З SIPTV: {final_key}")
