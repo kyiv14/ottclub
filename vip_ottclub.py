@@ -93,7 +93,7 @@ try:
     driver.get("https://ottclub.tv")
     time.sleep(6)
 
-    # Примусово ховаємо/видаляємо будь-які банери кукі з екрану через JS, щоб не заважали
+    # Примусово ховаємо/видаляємо будь-які банери кукі з екрану через JS
     try:
         driver.execute_script("""
             var badges = document.querySelectorAll('.cky-consent-container, #reminderOverlay, .modal, [class*="cookie"]');
@@ -108,31 +108,30 @@ try:
         EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='email']"))
     )
     
-    # Вводимо пошту НАПРЯМУ через JavaScript в обхід будь-яких перекриттів
+    # Вводимо пошту НАПРЯМУ через JavaScript
     driver.execute_script("arguments[0].value = arguments[1];", email_input, email_addr)
-    # Смикаємо подію зміни інпуту, щоб активована кнопка сайту зрозуміла, що текст є
     driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", email_input)
     driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", email_input)
     print("[+] Email залізобетонно введено через JS ін'єкцію")
     time.sleep(2)
 
-    # ── 3. Натискання кнопки реєстрації (Агресивна JS відправка) ─────────────
-    print("[*] Крок 3: Натискання кнопки реєстрації...")
+    # ── 3. Натискання кнопки реєстрації (БЕЗПЕЧНИЙ І ЧИСТИЙ JS SUBMIT) ────────
+    print("[*] Крок 3: Надсилання форми реєстрації...")
     
-    # Шукаємо кнопку форми
+    # Викликаємо submit прямо на тегу форми, де лежить наш інпут, повністю ігноруючи пошук кнопок по XPath
     try:
-        submit_btn = driver.find_element(By.XPATH, "//button[@type='submit'] | //input[@type='submit'] | //form//button | //*[contains(@class, 'btn') and (contains(text(), 'Реєстрація') or contains(text(), 'Вхід') or contains(text(), 'Продовжити'))]")
-        # Пробиваємо клік через JS
-        driver.execute_script("arguments[0].click();", submit_btn)
-        print("[+] Форму відправлено через прямий JS-клік по кнопці")
-    except Exception:
-        print("[!] Кнопку не знайдено, шлемо примусовий submit() на батьківську форму...")
-        form = email_input.find_element(By.XPATH, "./hierarchy::form | ..//form | ancestor::form")
-        driver.execute_script("arguments[0].submit();", form)
-        print("[+] Форму відправлено через метод форми submit()")
+        driver.execute_script("arguments[0].form.submit();", email_input)
+        print("[+] Форму успішно надіслано через прямое звернення до JS-методу form.submit()")
+    except Exception as submit_error:
+        print(f"[!] Прямий метод form.submit() викликав помилку: {submit_error}. Спробуємо знайти форму через селектор...")
+        try:
+            driver.execute_script("document.querySelector('form').submit();")
+            print("[+] Форму надіслано через загальний селектор document.querySelector('form').submit()")
+        except Exception as general_submit_error:
+            print(f"[-] Критична помилка надсилання форми через JS: {general_submit_error}")
+            raise general_submit_error
     
-    # Додатково ініціюємо клік по документу для запуску тригерів
-    time.sleep(7)
+    time.sleep(8)
 
     # ── 4. OTP з пошти ───────────────────────────────────────────────────────
     print("[*] Крок 4: Очікування коду підтвердження (до 5 хвилин)...")
