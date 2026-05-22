@@ -29,7 +29,8 @@ jobs:
           pip install --upgrade undetected-chromedriver requests beautifulsoup4 selenium
 
       - name: Run OTTclub script
-        run: python vip_ottclub.py
+        # Флаг -u отключает буферизацию, логи будут лететь в реальном времени!
+        run: python -u vip_ottclub.py
 
       - name: Upload Debug Screenshots
         if: failure()
