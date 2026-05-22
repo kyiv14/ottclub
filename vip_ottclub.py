@@ -43,9 +43,9 @@ def wait_for_otp_code(session, max_wait=300):
                 print(f"[+] OTP-код знайдено: {code}")
                 return code
             
-            # Кожні 30 секунд виводимо статус у лог для контролю процесу
-            if i % 6 == 0:
-                print(f"[*] Перевіряємо пошту... Коду ще немає. Статус відповіді сервера: {response.status_code}")
+            # Кожні 20 секунд примусово виводимо статус, щоб лог не згасав
+            if i % 4 == 0:
+                print(f"[*] Перевірка пошти (спроба {i+1})... Коду ще немає. Код відповіді сервера: {response.status_code}")
                 
         except Exception as e:
             print(f"[!] Помилка запиту до сервера пошти: {e}")
@@ -55,22 +55,21 @@ def wait_for_otp_code(session, max_wait=300):
 
 def get_clean_options():
     options = uc.ChromeOptions()
-    # СЕРВЕРНИЙ РЕЖИМ (Headless обов'язковий для GitHub Actions)
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1366,768")
-    # Маскування під реальний десктопний браузер, щоб уникнути блокувань
     options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
+    # Додаємо інкогніто для серверної версії для чистоти запусків
+    options.add_argument("--incognito")
     return options
 
 print("[*] Ініціалізація серверного браузера...")
 driver = None
 options = get_clean_options()
 
-# Гнучка ініціалізація під версію Chrome на сервері Ubuntu
 try:
     print("[*] Спроба запуска з version_main=148...")
     driver = uc.Chrome(options=options, version_main=148, use_subprocess=True)
@@ -89,19 +88,21 @@ except Exception as e:
 
 try:
     # ── 1. Тимчасова пошта ───────────────────────────────────────────────────
+    print("[*] Крок 1: Запит тимчасової пошти...")
     email_addr, py_session = get_temp_email()
     if not email_addr:
         raise Exception("Не вдалося отримати тимчасову пошту")
     print(f"[+] Використовуємо пошту: {email_addr}")
 
     # ── 2. Головна сторінка OTTclub ──────────────────────────────────────────
+    print("[*] Крок 2: Перехід на ottclub.tv...")
     driver.get("https://ottclub.tv")
     time.sleep(5)
 
-    # Закрити cookie-банер, якщо він перекриває елементи
     try:
         accept_btn = driver.find_element(By.CSS_SELECTOR, ".cky-btn-accept")
         driver.execute_script("arguments[0].click();", accept_btn)
+        print("[+] Cookie-банер закрито")
         time.sleep(1)
     except Exception:
         pass
@@ -111,9 +112,10 @@ try:
     )
     email_input.clear()
     email_input.send_keys(email_addr)
-    print("[+] Email введено")
+    print("[+] Email успішно введено в поле")
 
-    # ── 3. Кнопка реєстрації (відправка форми) ────────────────────────────────
+    # ── 3. Кнопка реєстрації ─────────────────────────────────────────────────
+    print("[*] Крок 3: Натискання кнопки реєстрації...")
     try:
         form = email_input.find_element(By.XPATH, "./hierarchy::form | ..//form | ancestor::form")
         driver.execute_script("arguments[0].submit();", form)
@@ -121,53 +123,51 @@ try:
     except Exception:
         hero_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit'], .hero__btn")))
         driver.execute_script("arguments[0].click();", hero_btn)
-        print("[*] Кнопку реєстрації натиснуто кліком")
+        print("[+] Кнопку реєстрації натиснуто кліком")
     
     time.sleep(5)
 
-    # ── 4. OTP з пошти (Очікування збільшено до 5 хвилин) ────────────────────
+    # ── 4. OTP з пошти ───────────────────────────────────────────────────────
+    print("[*] Крок 4: Очікування коду підтвердження...")
     otp_code = wait_for_otp_code(py_session, max_wait=300)
     if not otp_code:
         raise Exception("OTP-код не знайдено у листі")
 
-    # ── 5. Вводимо OTP в поля check-password__input ─────────────────────────
+    # ── 5. Вводимо OTP в поля ────────────────────────────────────────────────
+    print("[*] Крок 5: Введення OTP коду в поля сайту...")
     otp_inputs = wait.until(
         EC.presence_of_all_elements_located((By.CSS_SELECTOR, "input.check-password__input"))
     )
-    print(f"[*] Знайдено OTP-полів: {len(otp_inputs)}")
+    print(f"[*] Знайдено полів для вводу OTP: {len(otp_inputs)}")
 
     for i, digit in enumerate(otp_code[:len(otp_inputs)]):
         driver.execute_script("arguments[0].value = arguments[1];", otp_inputs[i], digit)
         driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", otp_inputs[i])
-    print("[+] OTP введено через JS")
+    print("[+] OTP код успішно введено")
     time.sleep(1)
 
-    # ── 6. Checkboxes — приймаємо угоду (Залізобетонний клік) ────────────────
+    # ── 6. Checkboxes — приймаємо угоду ──────────────────────────────────────
+    print("[*] Крок 6: Активація чекбоксів угоди...")
     try:
-        print("[*] Намагаємось відмітити чекбокс 'Угода користувача'...")
-        try:
-            agreement_link = driver.find_element(By.XPATH, "//a[contains(text(), 'Угоду') or contains(text(), 'Terms')]")
-            parent_element = agreement_link.find_element(By.XPATH, "..")
-            driver.execute_script("arguments[0].click();", parent_element)
-            print("[+] Клікнули по батьківському елементу посилання угоди")
-        except Exception:
-            checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
-            if checkboxes:
-                driver.execute_script("arguments[0].click();", checkboxes[0])
-                print("[+] Чекбокс відмічено напряму через інпут і JS")
-
-        time.sleep(0.5)
+        agreement_link = driver.find_element(By.XPATH, "//a[contains(text(), 'Угоду') or contains(text(), 'Terms')]")
+        parent_element = agreement_link.find_element(By.XPATH, "..")
+        driver.execute_script("arguments[0].click();", parent_element)
+        print("[+] Чекбокс угоди активовано через батьківський елемент")
+    except Exception:
         checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
-        for idx, cb in enumerate(checkboxes):
-            if not cb.is_selected():
-                driver.execute_script("arguments[0].click();", cb)
-                print(f"[+] Додатково активовано чекбокс №{idx+1}")
+        if checkboxes:
+            driver.execute_script("arguments[0].click();", checkboxes[0])
+            print("[+] Чекбокс активовано напряму через перший input")
 
-    except Exception as ce:
-        print(f"[!] Попередження при обробці чекбоксів: {ce}")
+    time.sleep(0.5)
+    checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
+    for idx, cb in enumerate(checkboxes):
+        if not cb.is_selected():
+            driver.execute_script("arguments[0].click();", cb)
+            print(f"[+] Додатково активовано обов'язковий чекбокс №{idx+1}")
 
-    # ── 7. Кнопка "Продовжити" (Залізобетонний пошук та клік через JS) ──────
-    print("[*] Шукаємо кнопку 'Продовжити'...")
+    # ── 7. Кнопка "Продовжити" ────────────────────────────────────────────────
+    print("[*] Крок 7: Натискання кнопки 'Продовжити'...")
     continue_btn = wait.until(
         EC.presence_of_element_located((
             By.XPATH,
@@ -175,52 +175,51 @@ try:
         ))
     )
     driver.execute_script("arguments[0].click();", continue_btn)
-    print("[+] Кнопку 'Продовжити' успішно натиснуто! Чекаємо переходу в білінг...")
+    print("[+] Кнопку 'Продовжити' натиснуто! Очікуємо переходу в кабінет білінгу...")
     time.sleep(12)
 
-    print(f"[*] Поточний URL: {driver.current_url}")
+    print(f"[*] Поточний URL кабінету: {driver.current_url}")
 
     # ── 8. КЛІК ПО ВКЛАДЦІ "Інші пристрої" ──────────────────────────────────
+    print("[*] Крок 8: Перехід у вкладку 'Інші пристрої'...")
     try:
-        print("[*] Шукаємо вкладку 'Інші пристрої'...")
         other_devices_tab = wait.until(
             EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Інші пристрої') or contains(text(), 'Other devices')]"))
         )
         driver.execute_script("arguments[0].click();", other_devices_tab)
-        print("[+] Успішно перемкнулися на вкладку 'Інші пристрої'. Чекаємо появи посилання...")
+        print("[+] Перемкнулися на вкладку 'Інші пристрої'. Чекаємо завантаження посилання...")
         time.sleep(4)
     except Exception as te:
-        print(f"[-] Не вдалося клікнути по вкладці 'Інші пристрої': {te}")
+        print(f"[-] Помилка перемикання вкладки: {te}")
 
-    # ── 9. ПАРСИНГ КЛЮЧА З ПОСИЛАННЯ В ТЕКСТІ ІНСТРУКЦІЇ SIPTV ──────────────
+    # ── 9. ПАРСИНГ КЛЮЧА ─────────────────────────────────────────────────────
+    print("[*] Крок 9: Парсинг ключа з інструкції...")
     final_key = None
     try:
-        print("[*] Шукаємо текст посилання з доменом myott.top...")
         target_element = wait.until(
-            EC.presence_of_element_located((By.開X_PATH, "//*[contains(text(), 'myott.top')]"))
+            EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'myott.top')]"))
         )
-        
         full_text = target_element.text.strip()
-        print(f"[+] Текст посилання знайдено: {full_text}")
+        print(f"[+] Знайдено рядок із доменом: {full_text}")
         
         match = re.search(r'playlist/([A-Z0-9]{8,12})', full_text, re.IGNORECASE)
         if match:
             final_key = match.group(1)
             
     except Exception as ke:
-        print(f"[!] Прямий пошук по тексту не вдався ({ke}). Пробуємо повний скан DOM...")
+        print(f"[!] Прямий пошук по тексту не вдався ({ke}). Скануємо весь DOM сторінки...")
         page_source = driver.page_source
         match = re.search(r'myott\.top/playlist/([A-Z0-9]{8,12})', page_source, re.IGNORECASE)
         if match:
             final_key = match.group(1)
 
-    # Фінальний відкритий вивід ключа в лог сервера
     if final_key and final_key != "E1KGAHB6XRA4":
         print(f"\n==========================================")
         print(f"[УСПІХ] НОВИЙ КЛЮЧ З SIPTV: {final_key}")
         print(f"==========================================\n")
 
         # ── 10. Відправляємо на i-tv.top ─────────────────────────────────────
+        print("[*] Крок 10: Відправка отриманого ключа на i-tv.top...")
         driver.get(MY_PANEL_URL)
         time.sleep(5)
 
@@ -239,17 +238,20 @@ try:
         except Exception:
             driver.execute_script("document.querySelector('form').submit();")
 
-        print("[+++] КЛЮЧ УСПІШНО ПЕРЕДАНО НА СЕРВЕР")
+        print("[+++] КЛЮЧ УСПІШНО ПЕРЕДАНО НА СЕРВЕР!")
         time.sleep(5)
     else:
-        print(f"[-] Скрипт отримав некоректний або порожній ключ: {final_key}")
+        print(f"[-] Скрипт повернув некоректний або порожній ключ: {final_key}")
         driver.save_screenshot("key_missing.png")
+        raise Exception("Ключ не знайдено, завершення з помилкою для створення скриншоту")
 
 except Exception as e:
-    print(f"[-] Виникла помилка під час виконання: {e}")
+    print(f"[-] Критична помилка під час виконання: {e}")
     if driver:
         driver.save_screenshot("error_debug.png")
+    raise e
 
 finally:
     if driver:
+        print("[*] Закриття сесії браузера.")
         driver.quit()
