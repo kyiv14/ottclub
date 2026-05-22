@@ -1,12 +1,14 @@
-name: Update OTTclub Key (API Requests)
+name: Update OTTclub Key
 
 on:
   schedule:
+    # Запуск каждые 2 дня в 5:00 утра
     - cron: '0 5 */2 * *'
+  # Возможность ручного запуска из панели GitHub Actions
   workflow_dispatch:
 
 jobs:
-  run-api-script:
+  run-script:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,10 +20,25 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Install Google Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+          pip install --upgrade undetected-chromedriver requests beautifulsoup4 selenium
 
-      - name: Run OTTclub API script
+      - name: Run OTTclub script
+        # Флаг -u отключает буферизацию вывода Python.
+        # Вы будете видеть логи выполнения (Шаг 1, Шаг 2 и т.д.) в реальном времени!
         run: python -u vip_ottclub.py
+
+      - name: Upload Debug Screenshots
+        # Скриншот сохранится в артефакты гитхаба ТОЛЬКО если скрипт упадет
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: "*.png"
