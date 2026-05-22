@@ -1,16 +1,24 @@
 import time
 import re
 import requests
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 
 # --- КОНФІГУРАЦІЯ ---
 TEMP_MAIL_URL = "https://i-tv.top/tempmail/index.php"
 CHECK_MAIL_URL = "https://i-tv.top/tempmail/check.php"
 MY_PANEL_URL   = "https://i-tv.top/uspeh/?tab=ottclub"
+
+OTT_API_SEND_OTP = "https://api.ottclub.tv/api/auth/send-code"
+OTT_API_VERIFY   = "https://api.ottclub.tv/api/auth/login"
+OTT_API_PROFILE  = "https://api.ottclub.tv/api/user/profile"
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    "Origin": "https://www.ottclub.tv",
+    "Referer": "https://www.ottclub.tv/"
+}
 
 def get_temp_email():
     session = requests.Session()
@@ -25,249 +33,99 @@ def get_temp_email():
         print(f"[-] Помилка отримання пошти: {e}")
         return None, None
 
-def wait_for_otp_code(session, max_wait=300):
-    """Чекає 6-значний OTP-код у листі від OTTclub з дебаг-логами."""
-    print(f"[*] Очікуємо OTP-код на пошті (максимум {max_wait} секунд)...")
+def wait_for_otp_code(session, max_wait=180):
+    """Чекає 6-значний OTP-код у листі від OTTclub."""
+    print(f"[*] Очікуємо OTP-код на пошті...")
     pattern = r'\b(\d{6})\b'
     for i in range(max_wait // 5):
         time.sleep(5)
         try:
-            response = session.get(
-                f"{CHECK_MAIL_URL}?lang=ru&nocache={time.time()}",
-                timeout=10
-            )
+            response = session.get(f"{CHECK_MAIL_URL}?lang=ru&nocache={time.time()}", timeout=10)
             match = re.search(pattern, response.text)
             if match:
                 code = match.group(1)
                 print(f"[+] OTP-код знайдено: {code}")
                 return code
-            if i % 4 == 0:
-                print(f"[*] Перевірка пошти (спроба {i+1})... Коду ще немає.")
         except Exception as e:
-            print(f"[!] Помилка запиту до сервера пошти: {e}")
             continue
     return None
 
-def get_clean_options():
-    options = uc.ChromeOptions()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1366,768")
-    options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--incognito")
-    return options
-
-print("[*] Ініціалізація серверного браузера...")
-driver = None
-options = get_clean_options()
-
 try:
-    print("[*] Спроба запуска з version_main=148...")
-    driver = uc.Chrome(options=options, version_main=148, use_subprocess=True)
-    wait = WebDriverWait(driver, 40)
-    print("[+] Серверний Chrome v148 успішно запущено!")
-except Exception as e:
-    print(f"[!] Не вдалося запустити з фіксованою v148: {e}")
-    print("[*] Пробуємо автоматичне визначення версії...")
-    try:
-        driver = uc.Chrome(options=options, use_subprocess=True)
-        wait = WebDriverWait(driver, 40)
-        print("[+] Серверний Chrome успішно запущено в авто-режимі!")
-    except Exception as e2:
-        print(f"[-] Критична помилка ініціалізації Chrome: {e2}")
-        raise e2
-
-try:
-    # ── 1. Тимчасова пошта ───────────────────────────────────────────────────
-    print("[*] Крок 1: Запит тимчасової пошти...")
+    # ── 1. ОТРИМУЄМО ТИМЧАСОВУ ПОШТУ ─────────────────────────────────────────
     email_addr, py_session = get_temp_email()
     if not email_addr:
         raise Exception("Не вдалося отримати тимчасову пошту")
     print(f"[+] Використовуємо пошту: {email_addr}")
 
-    # ── 2. Головна сторінка OTTclub ──────────────────────────────────────────
-    print("[*] Крок 2: Перехід на ottclub.tv...")
-    driver.get("https://ottclub.tv")
-    time.sleep(6)
+    # Сесія для запитів до OTTclub
+    ott_session = requests.Session()
+    ott_session.headers.update(HEADERS)
 
-    # Видаляємо кукі-банер, якщо він заважає фокусу
-    try:
-        driver.execute_script("var b = document.querySelector('.cky-consent-container'); if(b) b.remove();")
-    except Exception:
-        pass
-
-    # Знаходимо поле введення пошти
-    email_input = wait.until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='email']"))
-    )
+    # ── 2. НАДСИЛАЄМО ЗАПИТ НА ГЕНЕРАЦІЮ OTP (Імітація введення пошти) ──────
+    print("[*] Надсилаємо POST-запит на генерацію OTP...")
+    payload_send = {"email": email_addr, "language": "uk"}
     
-    # Клінічний чистий фокус на полі
-    driver.execute_script("arguments[0].focus();", email_input)
-    time.sleep(0.5)
+    res_send = ott_session.post(OTT_API_SEND_OTP, json=payload_send, timeout=15)
+    if res_send.status_code not in [200, 201]:
+        raise Exception(f"API не прийняло пошту. Статус: {res_send.status_code}, Відповідь: {res_send.text}")
+    print("[+] Запит на OTP успішно надіслано сервером")
 
-    # ЖЕЛЕЗОБЕТОННЫЙ ПОСИМВОЛЬНЫЙ ВВОД (щоб обдурити JS-валідатор сайту)
-    print("[*] Емулюємо посимвольне введення клавіатури...")
-    for char in email_addr:
-        email_input.send_keys(char)
-        time.sleep(0.1)  # Пауза між кліками клавіш
-
-    # Додатково штовхаємо тригери, щоб кнопка точно стала активною
-    driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", email_input)
-    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", email_input)
-    print("[+] Email успішно введено посимвольно")
-    time.sleep(2)
-
-    # ── 3. Натискання кнопки реєстрації за текстом на кнопці ──────────────────
-    print("[*] Крок 3: Натискання кнопки реєстрації...")
-    
-    try:
-        # Шукаємо кнопку за текстом на екрані
-        submit_btn = wait.until(EC.element_to_be_clickable((
-            By.XPATH, 
-            "//*[contains(text(), 'Протестувати') or contains(text(), 'безплатно') or contains(text(), 'Реєстрація') or @type='submit']"
-        )))
-        # Тиснемо через JS
-        driver.execute_script("arguments[0].click();", submit_btn)
-        print("[+] Кнопку реєстрації успішно натиснуто!")
-    except Exception as click_err:
-        print(f"[-] Не вдалося знайти активну кнопку через текст ({click_err}), б'ємо по тегах...")
-        fallback_btn = driver.find_element(By.XPATH, "//input[@type='email']/..//button | //input[@type='email']/../..//button | //button[contains(@class, 'btn')]")
-        driver.execute_script("arguments[0].click();", fallback_btn)
-        print("[+] Виконано резервний клік")
-    
-    time.sleep(8)
-
-    # ── 4. OTP з пошти ───────────────────────────────────────────────────────
-    print("[*] Крок 4: Очікування коду підтвердження (до 5 хвилин)...")
-    otp_code = wait_for_otp_code(py_session, max_wait=300)
+    # ── 3. ОЧІКУЄМО КОД З ПОШТИ ──────────────────────────────────────────────
+    otp_code = wait_for_otp_code(py_session, max_wait=180)
     if not otp_code:
-        raise Exception("OTP-код не знайдено у листі. Робота зупинена.")
+        raise Exception("OTP-код не прийшов на пошту.")
 
-    # ── 5. Вводимо OTP в поля ────────────────────────────────────────────────
-    print("[*] Крок 5: Введення OTP коду в поля сайту...")
-    otp_inputs = wait.until(
-        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "input.check-password__input"))
-    )
-    print(f"[*] Знайдено полів для вводу OTP: {len(otp_inputs)}")
+    # ── 4. АВТОРІЗУЄМОСЬ ТА ОТРИМУЄМО ТОКЕН СЕСІЇ (JWT) ──────────────────────
+    print("[*] Відправляємо OTP код на перевірку...")
+    payload_verify = {
+        "email": email_addr,
+        "code": int(otp_code),
+        "terms": True  # Приймаємо угоду користувача прямо в базі даних API
+    }
+    
+    res_verify = ott_session.post(OTT_API_VERIFY, json=payload_verify, timeout=15)
+    if res_verify.status_code not in [200, 201]:
+        raise Exception(f"Помилка авторизації коду. Відповідь: {res_verify.text}")
+    
+    # Витягуємо JWT токен з відповіді сервера
+    response_data = res_verify.json()
+    token = response_data.get("data", {}).get("token") or response_data.get("token")
+    if not token:
+        raise Exception("Сервер не повернув token авторизації")
+    print("[+] Авторизація успішна! Токен отримано.")
 
-    for i, digit in enumerate(otp_code[:len(otp_inputs)]):
-        driver.execute_script("arguments[0].value = arguments[1];", otp_inputs[i], digit)
-        driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", otp_inputs[i])
-    print("[+] OTP код успішно введено")
-    time.sleep(1)
+    # Оновлюємо заголовок сесії для подальших закритих запитів
+    ott_session.headers.update({"Authorization": f"Bearer {token}"})
 
-    # ── 6. Checkboxes — приймаємо угоду ──────────────────────────────────────
-    print("[*] Крок 6: Активація чекбоксів угоди...")
-    try:
-        agreement_link = driver.find_element(By.XPATH, "//a[contains(text(), 'Угоду') or contains(text(), 'Terms')]")
-        parent_element = agreement_link.find_element(By.XPATH, "..")
-        driver.execute_script("arguments[0].click();", parent_element)
-        print("[+] Чекбокс угоди активовано через батьківський елемент")
-    except Exception:
-        checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
-        if checkboxes:
-            driver.execute_script("arguments[0].click();", checkboxes[0])
-            print("[+] Чекбокс активовано напряму через перший input")
-
-    time.sleep(0.5)
-    checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
-    for idx, cb in enumerate(checkboxes):
-        if not cb.is_selected():
-            driver.execute_script("arguments[0].click();", cb)
-            print(f"[+] Додатково активовано обов'язковий чекбокс №{idx+1}")
-
-    # ── 7. Кнопка "Продовжити" ────────────────────────────────────────────────
-    print("[*] Крок 7: Натискання кнопки 'Продовжити'...")
-    continue_btn = wait.until(
-        EC.presence_of_element_located((
-            By.XPATH,
-            "//*[contains(translate(text(), 'ПРОДВЖИТИ', 'продовжити'), 'продовж') or contains(translate(text(), 'CONTINUE', 'continue'), 'continu')]"
-        ))
-    )
-    driver.execute_script("arguments[0].click();", continue_btn)
-    print("[+] Кнопку 'Продовжити' натиснуто! Очікуємо переходу в кабінет білінгу...")
-    time.sleep(12)
-
-    print(f"[*] Поточний URL кабінету: {driver.current_url}")
-
-    # ── 8. КЛІКАЄМО НА КНОПКУ КОРИСТУВАЧА ЩОБ ОТКРИТИ МОДАЛКУ ───────────────
-    print("[*] Крок 8: Ініціюємо клік по іконці користувача для відкриття модалки...")
-    try:
-        profile_trigger = wait.until(
-            EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'popup-settings') or contains(@href, 'profile')] | //*[contains(@class, 'header__user')] | //a[descendant::use[contains(@href, 'userB')]]"))
-        )
-        driver.execute_script("arguments[0].click();", profile_trigger)
-        print("[+] Клікнули по профілю! Чекаємо завантаження модальних даних...")
-        time.sleep(3)
-    except Exception as ue:
-        print(f"[-] Не вдалося знайти стандартний тригер профілю ({ue}), пробуємо резервний клік по SVG...")
-        try:
-            svg_fallback = driver.find_element(By.XPATH, "//*[local-name()='use' and contains(@href, 'userB')]/..")
-            driver.execute_script("arguments[0].click();", svg_fallback)
-            print("[+] Спрацював резервний клік по SVG-батьку")
-            time.sleep(3)
-        except Exception:
-            pass
-
-    # ── 9. ЗАБИРАЄМО КЛЮЧ З ID #subs_ottkey ──────────────────────────────────
-    print("[*] Крок 9: Очікуємо появу та наповнення елемента #subs_ottkey...")
-    final_key = None
-    try:
-        key_el = wait.until(EC.presence_of_element_located((By.ID, "subs_ottkey")))
-        for _ in range(10):
-            raw_key = key_el.get_attribute("textContent") or ""
-            raw_key = raw_key.strip()
-            if len(raw_key) >= 8 and len(raw_key) <= 12 and raw_key != "E1KGAHB6XRA4":
-                final_key = raw_key
-                break
-            time.sleep(1)
-    except Exception as ke:
-        print(f"[-] Помилка при отриманні текста з #subs_ottkey: {ke}")
-
+    # ── 5. ЗАБИРАЄМО ГОТОВИЙ КЛЮЧ З ПРОФІЛЮ ЧЕРЕЗ API ────────────────────────
+    print("[*] Запитуємо дані профілю з бекенду...")
+    res_profile = ott_session.get(OTT_API_PROFILE, timeout=15)
+    if res_profile.status_code != 200:
+        raise Exception(f"Не вдалося отримати профіль. Відповідь: {res_profile.text}")
+    
+    profile_json = res_profile.json()
+    
+    # Шукаємо ключ у структурі відповіді (перевіряємо можливі ключі в JSON об'єкті)
+    user_data = profile_json.get("data", {})
+    final_key = user_data.get("key") or user_data.get("ottkey") or user_data.get("billing_key")
+    
+    # Якщо сервер віддав складний JSON, підстрахуємося пошуком регуляркою по тексту відповіді
     if not final_key:
-        final_key = driver.execute_script('return document.querySelector("#subs_ottkey") ? document.querySelector("#subs_ottkey").textContent.trim() : null;')
+        match = re.search(r'"(?:key|ottkey|token)":"([A-Z0-9]{8,12})"', res_profile.text, re.IGNORECASE)
+        if match:
+            final_key = match.group(1)
 
-    if final_key and final_key != "E1KGAHB6XRA4" and len(final_key) >= 8:
+    # ── 6. ВІДПРАВЛЯЄМО КЛЮЧ НА ТВІЙ СЕРВЕР I-TV.TOP ─────────────────────────
+    if final_key and final_key != "E1KGAHB6XRA4":
         print(f"\n==========================================")
-        print(f"[УСПІХ] ЗНАЙДЕНО НОВИЙ КЛЮЧ: {final_key}")
+        print(f"[УСПІХ] ЗНАЙДЕНО НОВИЙ КЛЮЧ ЧЕРЕЗ API: {final_key}")
         print(f"==========================================\n")
 
-        # ── 10. Відправляємо на i-tv.top ─────────────────────────────────────
-        print("[*] Крок 10: Відправка отриманого ключа на i-tv.top...")
-        driver.get(MY_PANEL_URL)
-        time.sleep(5)
-
-        driver.execute_script("""
-            document.querySelectorAll('#reminderOverlay, .modal-backdrop, .toast-container')
-                .forEach(el => el.remove());
-            document.body.style.overflow = 'auto';
-        """)
-
-        input_field = wait.until(EC.presence_of_element_located((By.NAME, "input_data")))
-        driver.execute_script("arguments[0].value = arguments[1];", input_field, final_key)
-        
-        try:
-            target_form = input_field.find_element(By.XPATH, "./ancestor::form")
-            driver.execute_script("arguments[0].submit();", target_form)
-        except Exception:
-            driver.execute_script("document.querySelector('form').submit();")
-
-        print("[+++] КЛЮЧ УСПІШНО ПЕРЕДАНО НА СЕРВЕР!")
-        time.sleep(5)
+        print("[*] Передаємо новий ключ на i-tv.top...")
+        panel_res = requests.post(MY_PANEL_URL, data={"input_data": final_key}, timeout=15)
+        print(f"[+++] КЛЮЧ УСПІШНО ПЕРЕДАНО НА СЕРВЕР! Статус відповіді: {panel_res.status_code}")
     else:
-        print(f"[-] Скрипт повернув некоректний або порожній ключ: {final_key}")
-        driver.save_screenshot("key_missing.png")
-        raise Exception("Ключ не знайдено, завершення з помилкою")
+        print(f"[-] Не вдалося розпарсити ключ з JSON відповіді: {res_profile.text}")
 
 except Exception as e:
-    print(f"[-] Критична помилка під час виконання: {e}")
-    if driver:
-        driver.save_screenshot("error_debug.png")
-    raise e
-
-finally:
-    if driver:
-        driver.quit()
+    print(f"[-] Критична помилка виконання API-скрипта: {e}")
