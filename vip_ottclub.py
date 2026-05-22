@@ -29,7 +29,6 @@ def wait_for_otp_code(session, max_wait=300):
     """Чекає 6-значний OTP-код у листі від OTTclub з дебаг-логами."""
     print(f"[*] Очікуємо OTP-код на пошті (максимум {max_wait} секунд)...")
     pattern = r'\b(\d{6})\b'
-    
     for i in range(max_wait // 5):
         time.sleep(5)
         try:
@@ -42,15 +41,11 @@ def wait_for_otp_code(session, max_wait=300):
                 code = match.group(1)
                 print(f"[+] OTP-код знайдено: {code}")
                 return code
-            
-            # Кожні 20 секунд примусово виводимо статус, щоб лог не згасав
             if i % 4 == 0:
-                print(f"[*] Перевірка пошти (спроба {i+1})... Коду ще немає. Код відповіді сервера: {response.status_code}")
-                
+                print(f"[*] Перевірка пошти (спроба {i+1})... Коду ще немає.")
         except Exception as e:
             print(f"[!] Помилка запиту до сервера пошти: {e}")
             continue
-            
     return None
 
 def get_clean_options():
@@ -62,7 +57,6 @@ def get_clean_options():
     options.add_argument("--window-size=1366,768")
     options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    # Додаємо інкогніто для серверної версії для чистоти запусків
     options.add_argument("--incognito")
     return options
 
@@ -128,7 +122,7 @@ try:
     time.sleep(5)
 
     # ── 4. OTP з пошти ───────────────────────────────────────────────────────
-    print("[*] Крок 4: Очікування коду підтвердження...")
+    print("[*] Крок 4: Очікування коду підтвердження (до 5 хвилин)...")
     otp_code = wait_for_otp_code(py_session, max_wait=300)
     if not otp_code:
         raise Exception("OTP-код не знайдено у листі")
@@ -180,42 +174,50 @@ try:
 
     print(f"[*] Поточний URL кабінету: {driver.current_url}")
 
-    # ── 8. КЛІК ПО ВКЛАДЦІ "Інші пристрої" ──────────────────────────────────
-    print("[*] Крок 8: Перехід у вкладку 'Інші пристрої'...")
+    # ── 8. КЛІКАЄМО НА КНОПКУ КОРИСТУВАЧА ЩОБ ОТКРИТИ МОДАЛКУ ───────────────
+    print("[*] Крок 8: Ініціюємо клік по іконці користувача для відкриття модалки...")
     try:
-        other_devices_tab = wait.until(
-            EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Інші пристрої') or contains(text(), 'Other devices')]"))
+        profile_trigger = wait.until(
+            EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'popup-settings') or contains(@href, 'profile')] | //*[contains(@class, 'header__user')] | //a[descendant::use[contains(@href, 'userB')]]"))
         )
-        driver.execute_script("arguments[0].click();", other_devices_tab)
-        print("[+] Перемкнулися на вкладку 'Інші пристрої'. Чекаємо завантаження посилання...")
-        time.sleep(4)
-    except Exception as te:
-        print(f"[-] Помилка перемикання вкладки: {te}")
+        driver.execute_script("arguments[0].click();", profile_trigger)
+        print("[+] Клікнули по профілю! Чекаємо завантаження модальних даних...")
+        time.sleep(3)
+    except Exception as ue:
+        print(f"[-] Не вдалося знайти стандартний тригер профілю ({ue}), пробуємо резервний клік по SVG...")
+        try:
+            svg_fallback = driver.find_element(By.XPATH, "//*[local-name()='use' and contains(@href, 'userB')]/..")
+            driver.execute_script("arguments[0].click();", svg_fallback)
+            print("[+] Спрацював резервний клік по SVG-батьку")
+            time.sleep(3)
+        except Exception:
+            pass
 
-    # ── 9. ПАРСИНГ КЛЮЧА ─────────────────────────────────────────────────────
-    print("[*] Крок 9: Парсинг ключа з інструкції...")
+    # ── 9. ЗАБИРАЄМО КЛЮЧ З ID #subs_ottkey ──────────────────────────────────
+    print("[*] Крок 9: Очікуємо появу та наповнення елемента #subs_ottkey...")
     final_key = None
     try:
-        target_element = wait.until(
-            EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'myott.top')]"))
-        )
-        full_text = target_element.text.strip()
-        print(f"[+] Знайдено рядок із доменом: {full_text}")
+        key_el = wait.until(EC.presence_of_element_located((By.ID, "subs_ottkey")))
         
-        match = re.search(r'playlist/([A-Z0-9]{8,12})', full_text, re.IGNORECASE)
-        if match:
-            final_key = match.group(1)
+        # Перевіряємо наявність тексту всередині блоку (цикл очікування наповнення до 10 секунд)
+        for _ in range(10):
+            raw_key = key_el.get_attribute("textContent") or ""
+            raw_key = raw_key.strip()
+            if len(raw_key) >= 8 and len(raw_key) <= 12 and raw_key != "E1KGAHB6XRA4":
+                final_key = raw_key
+                break
+            time.sleep(1)
             
     except Exception as ke:
-        print(f"[!] Прямий пошук по тексту не вдався ({ke}). Скануємо весь DOM сторінки...")
-        page_source = driver.page_source
-        match = re.search(r'myott\.top/playlist/([A-Z0-9]{8,12})', page_source, re.IGNORECASE)
-        if match:
-            final_key = match.group(1)
+        print(f"[-] Помилка при отриманні тексту з #subs_ottkey: {ke}")
 
-    if final_key and final_key != "E1KGAHB6XRA4":
+    # Резервний прямий забір через JS-екстрактор
+    if not final_key:
+        final_key = driver.execute_script('return document.querySelector("#subs_ottkey") ? document.querySelector("#subs_ottkey").textContent.trim() : null;')
+
+    if final_key and final_key != "E1KGAHB6XRA4" and len(final_key) >= 8:
         print(f"\n==========================================")
-        print(f"[УСПІХ] НОВИЙ КЛЮЧ З SIPTV: {final_key}")
+        print(f"[УСПІХ] ЗНАЙДЕНО НОВИЙ КЛЮЧ: {final_key}")
         print(f"==========================================\n")
 
         # ── 10. Відправляємо на i-tv.top ─────────────────────────────────────
@@ -243,7 +245,7 @@ try:
     else:
         print(f"[-] Скрипт повернув некоректний або порожній ключ: {final_key}")
         driver.save_screenshot("key_missing.png")
-        raise Exception("Ключ не знайдено, завершення з помилкою для створення скриншоту")
+        raise Exception("Ключ не знайдено, завершення з помилкою")
 
 except Exception as e:
     print(f"[-] Критична помилка під час виконання: {e}")
@@ -253,5 +255,4 @@ except Exception as e:
 
 finally:
     if driver:
-        print("[*] Закриття сесії браузера.")
         driver.quit()
