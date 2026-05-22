@@ -3,7 +3,6 @@ import re
 import requests
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
@@ -92,59 +91,54 @@ try:
     # ── 2. Головна сторінка OTTclub ──────────────────────────────────────────
     print("[*] Крок 2: Перехід на ottclub.tv...")
     driver.get("https://ottclub.tv")
-    time.sleep(5)
+    time.sleep(6)
 
+    # Примусово ховаємо/видаляємо будь-які банери кукі з екрану через JS, щоб не заважали
     try:
-        accept_btn = driver.find_element(By.CSS_SELECTOR, ".cky-btn-accept")
-        driver.execute_script("arguments[0].click();", accept_btn)
-        print("[+] Cookie-банер закрито")
-        time.sleep(1)
+        driver.execute_script("""
+            var badges = document.querySelectorAll('.cky-consent-container, #reminderOverlay, .modal, [class*="cookie"]');
+            badges.forEach(function(el) { el.remove(); });
+        """)
+        print("[+] Можливі cookie-банери примусово видалено з DOM")
     except Exception:
         pass
 
+    # Знаходимо поле введення пошти
     email_input = wait.until(
         EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='email']"))
     )
-    email_input.clear()
-    email_input.send_keys(email_addr)
-    print("[+] Email успішно введено в поле")
+    
+    # Вводимо пошту НАПРЯМУ через JavaScript в обхід будь-яких перекриттів
+    driver.execute_script("arguments[0].value = arguments[1];", email_input, email_addr)
+    # Смикаємо подію зміни інпуту, щоб активована кнопка сайту зрозуміла, що текст є
+    driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", email_input)
+    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", email_input)
+    print("[+] Email залізобетонно введено через JS ін'єкцію")
+    time.sleep(2)
 
-    # ── 3. Кнопка реєстрації (ЗАЛІЗОБЕТОННИЙ КЛІК ТА ENTER) ───────────────────
+    # ── 3. Натискання кнопки реєстрації (Агресивна JS відправка) ─────────────
     print("[*] Крок 3: Натискання кнопки реєстрації...")
-    form_submitted = False
     
-    # Спроба 1: Клік через JS по кнопці submit форми або по тексту
+    # Шукаємо кнопку форми
     try:
-        submit_btn = driver.find_element(By.XPATH, "//button[@type='submit'] | //input[@type='submit'] | //*[contains(@class, 'btn') and (contains(text(), 'Реєстрація') or contains(text(), 'Вхід') or contains(text(), 'Продовжити'))]")
+        submit_btn = driver.find_element(By.XPATH, "//button[@type='submit'] | //input[@type='submit'] | //form//button | //*[contains(@class, 'btn') and (contains(text(), 'Реєстрація') or contains(text(), 'Вхід') or contains(text(), 'Продовжити'))]")
+        # Пробиваємо клік через JS
         driver.execute_script("arguments[0].click();", submit_btn)
-        print("[+] Форму відправлено через JS-клік по кнопці")
-        form_submitted = True
+        print("[+] Форму відправлено через прямий JS-клік по кнопці")
     except Exception:
-        print("[!] Не вдалося клікнути по кнопці через JS, пробуємо submit форми...")
-
-    # Спроба 2: Якщо кнопка не знайшлася, пробуємо submit самої форми
-    if not form_submitted:
-        try:
-            form = email_input.find_element(By.XPATH, "./hierarchy::form | ..//form | ancestor::form")
-            driver.execute_script("arguments[0].submit();", form)
-            print("[+] Форму відправлено через метод submit()")
-            form_submitted = True
-        except Exception:
-            print("[!] Метод submit() форми заблоковано або не знайдено...")
-
-    # Спроба 3: Фалбек для Headless — шлемо фізичний Enter прямо в інпут пошти
-    if not form_submitted:
-        print("[*] Надсилаємо клавішу ENTER в полі введення пошти...")
-        email_input.send_keys(Keys.ENTER)
-        print("[+] Клавішу ENTER успішно надіслано")
+        print("[!] Кнопку не знайдено, шлемо примусовий submit() на батьківську форму...")
+        form = email_input.find_element(By.XPATH, "./hierarchy::form | ..//form | ancestor::form")
+        driver.execute_script("arguments[0].submit();", form)
+        print("[+] Форму відправлено через метод форми submit()")
     
-    time.sleep(6)
+    # Додатково ініціюємо клік по документу для запуску тригерів
+    time.sleep(7)
 
     # ── 4. OTP з пошти ───────────────────────────────────────────────────────
     print("[*] Крок 4: Очікування коду підтвердження (до 5 хвилин)...")
     otp_code = wait_for_otp_code(py_session, max_wait=300)
     if not otp_code:
-        raise Exception("OTP-код не знайдено у листі")
+        raise Exception("OTP-код не знайдено у листі. Форма не надіслалась або домен у спам-фільтрі.")
 
     # ── 5. Вводимо OTP в поля ────────────────────────────────────────────────
     print("[*] Крок 5: Введення OTP коду в поля сайту...")
@@ -191,13 +185,13 @@ try:
     print("[+] Кнопку 'Продовжити' натиснуто! Очікуємо переходу в кабінет білінгу...")
     time.sleep(12)
 
-    print(f"[*] Поточний URLカбінету: {driver.current_url}")
+    print(f"[*] Поточний URL кабінету: {driver.current_url}")
 
     # ── 8. КЛІКАЄМО НА КНОПКУ КОРИСТУВАЧА ЩОБ ОТКРИТИ МОДАЛКУ ───────────────
     print("[*] Крок 8: Ініціюємо клік по іконці користувача для відкриття модалки...")
     try:
         profile_trigger = wait.until(
-            EC.presence_of_element_located((By.開XPATH, "//a[contains(@href, 'popup-settings') or contains(@href, 'profile')] | //*[contains(@class, 'header__user')] | //a[descendant::use[contains(@href, 'userB')]]"))
+            EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'popup-settings') or contains(@href, 'profile')] | //*[contains(@class, 'header__user')] | //a[descendant::use[contains(@href, 'userB')]]"))
         )
         driver.execute_script("arguments[0].click();", profile_trigger)
         print("[+] Клікнули по профілю! Чекаємо завантаження модальних даних...")
@@ -225,7 +219,7 @@ try:
                 break
             time.sleep(1)
     except Exception as ke:
-        print(f"[-] Помилка при отриманні тексту з #subs_ottkey: {ke}")
+        print(f"[-] Помилка при отриманні текста з #subs_ottkey: {ke}")
 
     if not final_key:
         final_key = driver.execute_script('return document.querySelector("#subs_ottkey") ? document.querySelector("#subs_ottkey").textContent.trim() : null;')
