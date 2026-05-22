@@ -29,7 +29,7 @@ jobs:
           pip install --upgrade undetected-chromedriver requests beautifulsoup4 selenium
 
       - name: Run OTTclub script
-        # Флаг -u отключает буферизацию, логи будут лететь в реальном времени!
+        # Флаг -u отключает буферизацию Python, логи на гитхабе будут видны каждую секунду!
         run: python -u vip_ottclub.py
 
       - name: Upload Debug Screenshots
