@@ -2,7 +2,7 @@ name: Update OTTclub Key
 
 on:
   schedule:
-    - cron: '0 5 */2 * *'   # кожні 2 дні о 05:00 UTC
+    - cron: '0 5 */2 * *'
   workflow_dispatch:
 
 jobs:
@@ -37,4 +37,3 @@ jobs:
         with:
           name: debug-screenshots
           path: "*.png"
-          
