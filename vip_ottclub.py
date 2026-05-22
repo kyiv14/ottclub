@@ -47,32 +47,34 @@ def wait_for_otp_code(session, max_wait=120):
 
 def get_clean_options():
     options = uc.ChromeOptions()
+    # СЕРВЕРНИЙ РЕЖИМ (Headless увімкнено для GitHub Actions)
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--window-size=1366,768")
+    # Маскування під реальний десктопний браузер
     options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
     return options
 
-print("[*] Ініціалізація браузера...")
+print("[*] Ініціалізація серверного браузера...")
 driver = None
 options = get_clean_options()
 
-# Гнучка ініціалізація під версію Chrome на сервері
+# Гнучка ініціалізація під версію Chrome на сервері GitHub
 try:
-    print("[*] Спроба запуску з version_main=148...")
+    print("[*] Спроба запуска з version_main=148...")
     driver = uc.Chrome(options=options, version_main=148, use_subprocess=True)
     wait = WebDriverWait(driver, 40)
-    print("[+] Успішно запущено з версією 148")
+    print("[+] Серверний Chrome v148 успішно запущено!")
 except Exception as e:
     print(f"[!] Не вдалося запустити з фіксованою v148: {e}")
-    print("[*] Перемикання на автоматичне визначення версії...")
+    print("[*] Пробуємо автоматичне визначення версії...")
     try:
         driver = uc.Chrome(options=options, use_subprocess=True)
         wait = WebDriverWait(driver, 40)
-        print("[+] Успішно запущено в авто-режимі")
+        print("[+] Серверний Chrome успішно запущено в авто-режимі!")
     except Exception as e2:
         print(f"[-] Критична помилка ініціалізації Chrome: {e2}")
         raise e2
@@ -88,7 +90,7 @@ try:
     driver.get("https://ottclub.tv")
     time.sleep(5)
 
-    # Закрити cookie-банер, якщо він перекриває екран
+    # Закрити cookie-банер, якщо є
     try:
         accept_btn = driver.find_element(By.CSS_SELECTOR, ".cky-btn-accept")
         driver.execute_script("arguments[0].click();", accept_btn)
@@ -132,59 +134,83 @@ try:
     print("[+] OTP введено через JS")
     time.sleep(1)
 
-    # ── 6. Checkboxes — приймаємо угоду (Тільки першу галочку) ────────────────
+    # ── 6. Checkboxes — приймаємо угоду (Залізобетонний клік) ────────────────
     try:
+        print("[*] Намагаємось відмітити чекбокс 'Угода користувача'...")
+        try:
+            agreement_link = driver.find_element(By.XPATH, "//a[contains(text(), 'Угоду') or contains(text(), 'Terms')]")
+            parent_element = agreement_link.find_element(By.XPATH, "..")
+            driver.execute_script("arguments[0].click();", parent_element)
+            print("[+] Клікнули по батьківському елементу посилання угоди")
+        except Exception:
+            checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
+            if checkboxes:
+                driver.execute_script("arguments[0].click();", checkboxes[0])
+                print("[+] Чекбокс відмічено напряму через інпут і JS")
+
+        time.sleep(0.5)
         checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
-        if checkboxes and not checkboxes[0].is_selected():
-            driver.execute_script("arguments[0].click();", checkboxes[0])
-            print("[+] Чекбокс 'Угода користувача' відмічено")
+        for idx, cb in enumerate(checkboxes):
+            if not cb.is_selected():
+                driver.execute_script("arguments[0].click();", cb)
+                print(f"[+] Додатково активовано чекбокс №{idx+1}")
+
     except Exception as ce:
         print(f"[!] Попередження при обробці чекбоксів: {ce}")
 
-    # ── 7. Кнопка "Продовжити" ────────────────────────────────────────────────
+    # ── 7. Кнопка "Продовжити" (Залізобетонний пошук та клік через JS) ──────
+    print("[*] Шукаємо кнопку 'Продовжити'...")
     continue_btn = wait.until(
-        EC.element_to_be_clickable((
+        EC.presence_of_element_located((
             By.XPATH,
-            "//button[@type='submit'] | //button[contains(translate(text(), 'ПРОДВЖИТИ', 'продовжити'), 'продовж') or contains(translate(text(), 'CONTINUE', 'continue'), 'continu')]"
+            "//*[contains(translate(text(), 'ПРОДВЖИТИ', 'продовжити'), 'продовж') or contains(translate(text(), 'CONTINUE', 'continue'), 'continu')]"
         ))
     )
     driver.execute_script("arguments[0].click();", continue_btn)
-    print("[*] 'Продовжити' натиснуто, чекаємо переходу в білінг...")
-    time.sleep(10)
+    print("[+] Кнопку 'Продовжити' успішно натиснуто! Чекаємо переходу в білінг...")
+    time.sleep(12)
 
     print(f"[*] Поточний URL: {driver.current_url}")
 
-    # ── 8. Відкриваємо профіль — клікаємо іконку юзера ───────────────────────
+    # ── 8. КЛІК ПО ВКЛАДЦІ "Інші пристрої" ──────────────────────────────────
     try:
-        user_icon = wait.until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='profile'], .header__user, [class*='user'], [class*='profile']"))
+        print("[*] Шукаємо вкладку 'Інші пристрої'...")
+        other_devices_tab = wait.until(
+            EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Інші пристрої') or contains(text(), 'Other devices')]"))
         )
-        driver.execute_script("arguments[0].click();", user_icon)
-        print("[+] Вікно профілю відкрито")
-        time.sleep(5)
-    except Exception as ue:
-        print(f"[-] Не вдалося відкрити модальне вікно профілю: {ue}")
+        driver.execute_script("arguments[0].click();", other_devices_tab)
+        print("[+] Успішно перемкнулися на вкладку 'Інші пристрої'. Чекаємо появи посилання...")
+        time.sleep(4)
+    except Exception as te:
+        print(f"[-] Не вдалося клікнути по вкладці 'Інші пристрої': {te}")
 
-    # ── 9. Витягуємо ключ ─────────────────────────────────────────────────────
-    page_source = driver.page_source
-
-    # Покращений RegExp, стійкий до переносів рядків та пробілів у верстці
-    key_match = re.search(r'(?:Ключ|Key)\s*([^A-Z0-9]{0,50})\s*([A-Z0-9]{8,12})', page_source, re.IGNORECASE)
-    
+    # ── 9. ПАРСИНГ КЛЮЧА З ПОСИЛАННЯ В ТЕКСТІ ІНСТРУКЦІЇ SIPTV ──────────────
     final_key = None
-    if key_match:
-        final_key = key_match.group(2)
-    else:
-        # Резервний пошук (всі підходящі токени, крім системних слів)
-        skip = {"OTTCLUB", "ANDROIDTV", "APPLETV", "VIDAA", "SAMSUNG", "ENGLISH", "UKRAINIAN", "BILLING", "HTTPS"}
-        candidates = re.findall(r'\b([A-Z0-9]{8,12})\b', page_source)
-        for c in candidates:
-            if c not in skip:
-                final_key = c
-                break
+    try:
+        print("[*] Шукаємо текст посилання з доменом myott.top...")
+        target_element = wait.until(
+            EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'myott.top')]"))
+        )
+        
+        full_text = target_element.text.strip()
+        print(f"[+] Текст посилання знайдено: {full_text}")
+        
+        match = re.search(r'playlist/([A-Z0-9]{8,12})', full_text, re.IGNORECASE)
+        if match:
+            final_key = match.group(1)
+            
+    except Exception as ke:
+        print(f"[!] Прямий пошук по тексту не вдався ({ke}). Пробуємо повний скан DOM...")
+        page_source = driver.page_source
+        match = re.search(r'myott\.top/playlist/([A-Z0-9]{8,12})', page_source, re.IGNORECASE)
+        if match:
+            final_key = match.group(1)
 
-    if final_key:
-        print(f"[УСПІХ] КЛЮЧ АКТУАЛІЗОВАНО: {final_key}")
+    # Фінальний вивід без приховування
+    if final_key and final_key != "E1KGAHB6XRA4":
+        print(f"\n==========================================")
+        print(f"[УСПІХ] НОВИЙ КЛЮЧ З SIPTV: {final_key}")
+        print(f"==========================================\n")
 
         # ── 10. Відправляємо на i-tv.top ─────────────────────────────────────
         driver.get(MY_PANEL_URL)
@@ -208,11 +234,11 @@ try:
         print("[+++] КЛЮЧ УСПІШНО ПЕРЕДАНО НА СЕРВЕР")
         time.sleep(5)
     else:
-        print("[-] Ключ не знайдено на сторінці")
+        print(f"[-] Скрипт отримав некоректний або порожній ключ: {final_key}")
         driver.save_screenshot("key_missing.png")
 
 except Exception as e:
-    print(f"[-] Помилка під час виконання: {e}")
+    print(f"[-] Виникла помилка під час виконання: {e}")
     if driver:
         driver.save_screenshot("error_debug.png")
 
