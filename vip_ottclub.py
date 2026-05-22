@@ -93,13 +93,12 @@ try:
     driver.get("https://ottclub.tv")
     time.sleep(6)
 
-    # Примусово ховаємо/видаляємо будь-які банери кукі з екрану через JS
+    # Акуратно видаляємо тільки заважаючий банер кукі, не чіпаючи інтерфейс
     try:
         driver.execute_script("""
-            var badges = document.querySelectorAll('.cky-consent-container, #reminderOverlay, .modal, [class*="cookie"]');
-            badges.forEach(function(el) { el.remove(); });
+            var cookieBanner = document.querySelector('.cky-consent-container');
+            if(cookieBanner) { cookieBanner.remove(); print('[+] Банер кукі видалено'); }
         """)
-        print("[+] Можливі cookie-банери примусово видалено з DOM")
     except Exception:
         pass
 
@@ -108,28 +107,31 @@ try:
         EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='email']"))
     )
     
-    # Вводимо пошту НАПРЯМУ через JavaScript
+    # Вводимо пошту через JavaScript
     driver.execute_script("arguments[0].value = arguments[1];", email_input, email_addr)
     driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", email_input)
     driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", email_input)
-    print("[+] Email залізобетонно введено через JS ін'єкцію")
+    print("[+] Email введено через JS ін'єкцію")
     time.sleep(2)
 
-    # ── 3. Натискання кнопки реєстрації (БЕЗПЕЧНИЙ І ЧИСТИЙ JS SUBMIT) ────────
-    print("[*] Крок 3: Надсилання форми реєстрації...")
+    # ── 3. Натискання кнопки реєстрації за текстом на кнопці ──────────────────
+    print("[*] Крок 3: Натискання кнопки реєстрації...")
     
-    # Викликаємо submit прямо на тегу форми, де лежить наш інпут, повністю ігноруючи пошук кнопок по XPath
     try:
-        driver.execute_script("arguments[0].form.submit();", email_input)
-        print("[+] Форму успішно надіслано через прямое звернення до JS-методу form.submit()")
-    except Exception as submit_error:
-        print(f"[!] Прямий метод form.submit() викликав помилку: {submit_error}. Спробуємо знайти форму через селектор...")
-        try:
-            driver.execute_script("document.querySelector('form').submit();")
-            print("[+] Форму надіслано через загальний селектор document.querySelector('form').submit()")
-        except Exception as general_submit_error:
-            print(f"[-] Критична помилка надсилання форми через JS: {general_submit_error}")
-            raise general_submit_error
+        # Шукаємо кнопку, яка містить текст "Протестувати" або "безплатно"
+        submit_btn = wait.until(EC.presence_of_element_located((
+            By.XPATH, 
+            "//*[contains(text(), 'Протестувати') or contains(text(), 'безплатно') or contains(text(), 'Реєстрація') or @type='submit']"
+        )))
+        # Кликаємо залізобетонно через JS
+        driver.execute_script("arguments[0].click();", submit_btn)
+        print("[+] Кнопку реєстрації успішно натиснуто через JS клік")
+    except Exception as click_err:
+        print(f"[-] Не вдалося знайти кнопку через точний текст ({click_err}), пробуємо клік по сусідньому елементу...")
+        # Резерв: клікаємо по першому ліпшому div/button поруч з інпутом, який схожий на кнопку
+        fallback_btn = driver.find_element(By.XPATH, "//input[@type='email']/..//button | //input[@type='email']/../..//button | //button")
+        driver.execute_script("arguments[0].click();", fallback_btn)
+        print("[+] Виконано резервний клік по кнопці")
     
     time.sleep(8)
 
@@ -137,7 +139,7 @@ try:
     print("[*] Крок 4: Очікування коду підтвердження (до 5 хвилин)...")
     otp_code = wait_for_otp_code(py_session, max_wait=300)
     if not otp_code:
-        raise Exception("OTP-код не знайдено у листі. Форма не надіслалась або домен у спам-фільтрі.")
+        raise Exception("OTP-код не знайдено у листі. Робота зупинена.")
 
     # ── 5. Вводимо OTP в поля ────────────────────────────────────────────────
     print("[*] Крок 5: Введення OTP коду в поля сайту...")
