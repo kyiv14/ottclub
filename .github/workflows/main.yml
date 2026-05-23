@@ -2,9 +2,7 @@ name: Update OTTclub Key
 
 on:
   schedule:
-    # Запуск каждые 2 дня в 5:00 утра
     - cron: '0 5 */2 * *'
-  # Возможность ручного запуска из панели GitHub Actions
   workflow_dispatch:
 
 jobs:
@@ -31,12 +29,9 @@ jobs:
           pip install --upgrade undetected-chromedriver requests beautifulsoup4 selenium
 
       - name: Run OTTclub script
-        # Флаг -u отключает буферизацию вывода Python.
-        # Вы будете видеть логи выполнения (Шаг 1, Шаг 2 и т.д.) в реальном времени!
         run: python -u vip_ottclub.py
 
       - name: Upload Debug Screenshots
-        # Скриншот сохранится в артефакты гитхаба ТОЛЬКО если скрипт упадет
         if: failure()
         uses: actions/upload-artifact@v4
         with:
