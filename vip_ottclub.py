@@ -3,6 +3,7 @@ import re
 import requests
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
@@ -26,7 +27,7 @@ def get_temp_email():
         return None, None
 
 def wait_for_otp_code(session, max_wait=300):
-    """Чекає 6-значний OTP-код у листі від OTTclub з дебаг-логами."""
+    """Чекає 6-значний OTP-код у листі від OTTclub."""
     print(f"[*] Очікуємо OTP-код на пошті (максимум {max_wait} секунд)...")
     pattern = r'\b(\d{6})\b'
     for i in range(max_wait // 5):
@@ -105,11 +106,9 @@ try:
         EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='email']"))
     )
     
-    # Клінічний фокус на полі перед введенням
     driver.execute_script("arguments[0].focus();", email_input)
     time.sleep(0.5)
 
-    # ПОСИМВОЛЬНЕ ВВЕДЕННЯ (активує JS-валідатори та робить кнопку клікабельною)
     print("[*] Посимвольне введення пошти...")
     for char in email_addr:
         email_input.send_keys(char)
@@ -119,21 +118,28 @@ try:
     print("[+] Email успішно введено в поле")
     time.sleep(2)
 
-    # ── 3. Натискання кнопки реєстрації за текстом ───────────────────────────
-    print("[*] Крок 3: Натискання кнопки реєстрації...")
-    submit_btn = wait.until(EC.presence_of_element_located((
-        By.XPATH, 
-        "//*[contains(text(), 'Протестувати') or contains(text(), 'безплатно') or contains(text(), 'Реєстрація') or @type='submit']"
-    )))
-    driver.execute_script("arguments[0].click();", submit_btn)
-    print("[+] Кнопку реєстрації натиснуто!")
+    # ── 3. Надсилання форми через Клавішу ENTER (Захист від Intercepted) ──────
+    print("[*] Крок 3: Натискання кнопки реєстрації (Надсилаємо сигнал ENTER)...")
+    try:
+        # Прожимаем Enter прямо внутри инпута. Для headless это на 200% надежнее клика
+        email_input.send_keys(Keys.ENTER)
+        print("[+] Сигнал ENTER успішно надіслано в поле")
+    except Exception as enter_err:
+        print(f"[!] Не вдалося надіслати ENTER ({enter_err}), пробуємо клік через JS...")
+        try:
+            submit_btn = driver.find_element(By.XPATH, "//*[contains(text(), 'Протестувати') or contains(text(), 'безплатно') or @type='submit']")
+            driver.execute_script("arguments[0].click();", submit_btn)
+            print("[+] Кнопку активовано через резервний JS-клік")
+        except Exception as js_err:
+            print(f"[-] Альтернативний клік теж не пройшов: {js_err}")
+    
     time.sleep(8)
 
     # ── 4. OTP з пошти ───────────────────────────────────────────────────────
     print("[*] Крок 4: Очікування коду підтвердження (до 5 хвилин)...")
     otp_code = wait_for_otp_code(py_session, max_wait=300)
     if not otp_code:
-        raise Exception("OTP-код не знайдено у листі. Зупинка.")
+        raise Exception("OTP-код не знайдено у листі. Реєстрація не пройшла.")
 
     # ── 5. Вводимо OTP в поля ────────────────────────────────────────────────
     print("[*] Крок 5: Введення OTP коду в поля сайту...")
@@ -151,22 +157,19 @@ try:
     # ── 6. Checkboxes — приймаємо угоду ──────────────────────────────────────
     print("[*] Крок 6: Активація чекбоксів угоди...")
     try:
-        agreement_link = driver.find_element(By.XPATH, "//a[contains(text(), 'Угоду') or contains(text(), 'Terms')]")
+        agreement_link = driver.find_element(By.開XPATH, "//a[contains(text(), 'Угоду') or contains(text(), 'Terms')]")
         parent_element = agreement_link.find_element(By.XPATH, "..")
         driver.execute_script("arguments[0].click();", parent_element)
-        print("[+] Чекбокс угоди активовано через батьківський елемент")
     except Exception:
         checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
         if checkboxes:
             driver.execute_script("arguments[0].click();", checkboxes[0])
-            print("[+] Чекбокс активовано напряму через перший input")
 
     time.sleep(0.5)
     checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
     for idx, cb in enumerate(checkboxes):
         if not cb.is_selected():
             driver.execute_script("arguments[0].click();", cb)
-            print(f"[+] Додатково активовано обов'язковий чекбокс №{idx+1}")
 
     # ── 7. Кнопка "Продовжити" ────────────────────────────────────────────────
     print("[*] Крок 7: Натискання кнопки 'Продовжити'...")
@@ -191,12 +194,10 @@ try:
         driver.execute_script("arguments[0].click();", profile_trigger)
         print("[+] Клікнули по профілю! Чекаємо завантаження модальних даних...")
         time.sleep(4)
-    except Exception as ue:
-        print(f"[-] Не вдалося знайти стандартний тригер профілю ({ue}), пробуємо резервний клік по SVG...")
+    except Exception:
         try:
-            svg_fallback = driver.find_element(By.XPATH, "//*[local-name()='use' and contains(@href, 'userB')]/..")
+            svg_fallback = driver.find_element(By.開XPATH, "//*[local-name()='use' and contains(@href, 'userB')]/..")
             driver.execute_script("arguments[0].click();", svg_fallback)
-            print("[+] Спрацював резервний клік по SVG-батьку")
             time.sleep(4)
         except Exception:
             pass
